@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Custom Countdown</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:"Segoe UI",Arial,sans-serif;color:#fff}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#000 url("background.png") center/cover no-repeat fixed}
+body:before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.40);z-index:0}
+.app{position:relative;z-index:1;width:min(1200px,94vw);padding:32px;text-align:center;background:rgba(0,0,0,.44);border-radius:22px;backdrop-filter:blur(3px);box-shadow:0 12px 45px rgba(0,0,0,.35)}
+.name{font-size:clamp(30px,5vw,72px);font-weight:700;letter-spacing:.06em;text-transform:uppercase;text-shadow:0 4px 15px #000}
+.target{margin:8px 0 28px;font-size:clamp(15px,2vw,25px);opacity:.9}
+.settings{display:flex;justify-content:center;align-items:end;gap:12px;flex-wrap:wrap}
+.field{text-align:left}.field label{display:block;margin-bottom:6px;font-size:14px}
+input{height:46px;border:0;border-radius:8px;padding:8px 12px;font-size:16px;background:#fff;color:#111}
+.nameInput{min-width:280px}
+button{height:46px;border-radius:8px;padding:0 18px;font-size:15px;font-weight:700;cursor:pointer}
+.start{border:0;background:#fff;color:#111}.reset{background:#222;color:#fff;border:1px solid #777}.full{background:#fff;color:#111;border:0}
+.error{min-height:24px;margin-top:10px;color:#ffb3b3;font-size:14px}
+.saved{min-height:20px;margin-top:4px;font-size:13px;opacity:.65}
+.countdown{display:flex;justify-content:center;gap:clamp(8px,3vw,34px);margin-top:32px}
+.unit{min-width:110px}.number{font-size:clamp(48px,10vw,150px);font-weight:700;line-height:1;font-variant-numeric:tabular-nums;text-shadow:0 4px 18px #000}
+.label{margin-top:10px;font-size:clamp(12px,1.5vw,21px);letter-spacing:.14em;opacity:.8}
+.timeup{display:none;margin-top:30px;font-size:clamp(42px,8vw,110px);font-weight:700;text-shadow:0 4px 20px #000}
+.actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:22px}
+.hint{margin-top:12px;font-size:12px;opacity:.5}
+@media(max-width:700px){
+ .app{padding:20px}.field{width:100%}.nameInput,input,button{width:100%}
+ .countdown{gap:4px}.unit{min-width:65px}.actions button{width:100%}
+}
+</style>
+</head>
+<body>
+<main class="app">
+  <div class="name" id="displayName">COUNTDOWN TIMER</div>
+  <div class="target" id="targetText">Target: 1 January 2028, 00:00:00</div>
+
+  <section class="settings" aria-label="Countdown settings">
+    <div class="field">
+      <label for="countdownName">Countdown Name</label>
+      <input class="nameInput" id="countdownName" type="text" value="COUNTDOWN TIMER" placeholder="Enter countdown name">
+    </div>
+    <div class="field">
+      <label for="targetDate">End Date</label>
+      <input id="targetDate" type="date" value="2028-01-01">
+    </div>
+    <div class="field">
+      <label for="targetTime">End Time</label>
+      <input id="targetTime" type="time" value="00:00:00" step="1">
+    </div>
+    <button class="start" id="startBtn" type="button">START / UPDATE</button>
+    <button class="reset" id="resetBtn" type="button">RESET</button>
+  </section>
+
+  <div class="error" id="error" aria-live="polite"></div>
+  <div class="saved" id="savedStatus"></div>
+
+  <section class="countdown" id="countdown" aria-live="polite">
+    <div class="unit"><div class="number" id="days">000</div><div class="label">DAYS</div></div>
+    <div class="unit"><div class="number" id="hours">00</div><div class="label">HOURS</div></div>
+    <div class="unit"><div class="number" id="minutes">00</div><div class="label">MINUTES</div></div>
+    <div class="unit"><div class="number" id="seconds">00</div><div class="label">SECONDS</div></div>
+  </section>
+
+  <div class="timeup" id="timeup">TIME'S UP!</div>
+
+  <div class="actions">
+    <button class="full" id="fullscreenBtn" type="button">FULL SCREEN</button>
+  </div>
+  <div class="hint">Your latest countdown is saved in this browser automatically.</div>
+</main>
+
+<script>
+(() => {
+  const STORAGE_KEY = "customCountdown.v2";
+  let target = null;
+  let timer = null;
+
+  const $ = id => document.getElementById(id);
+  const pad = (n, d) => String(n).padStart(d, "0");
+
+  function setSaved(text) {
+    $("savedStatus").textContent = text || "";
+  }
+
+  function saveSettings() {
+    const data = {
+      name: $("countdownName").value.trim(),
+      date: $("targetDate").value,
+      time: $("targetTime").value
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    setSaved("Saved in this browser");
+  }
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (data.name) $("countdownName").value = data.name;
+      if (data.date) $("targetDate").value = data.date;
+      if (data.time) $("targetTime").value = data.time;
+      return Boolean(data.name && data.date && data.time);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function clearSavedSettings() {
+    localStorage.removeItem(STORAGE_KEY);
+    setSaved("Saved countdown cleared");
+  }
+
+  function render() {
+    if (!target) return;
+
+    const diff = target.getTime() - Date.now();
+
+    if (diff <= 0) {
+      $("days").textContent = "000";
+      $("hours").textContent = "00";
+      $("minutes").textContent = "00";
+      $("seconds").textContent = "00";
+      $("countdown").style.display = "none";
+      $("timeup").style.display = "block";
+      clearInterval(timer);
+      timer = null;
+      return;
+    }
+
+    $("countdown").style.display = "flex";
+    $("timeup").style.display = "none";
+
+    const totalSeconds = Math.floor(diff / 1000);
+    $("days").textContent = pad(Math.floor(totalSeconds / 86400), 3);
+    $("hours").textContent = pad(Math.floor((totalSeconds % 86400) / 3600), 2);
+    $("minutes").textContent = pad(Math.floor((totalSeconds % 3600) / 60), 2);
+    $("seconds").textContent = pad(totalSeconds % 60, 2);
+  }
+
+  function startCountdown(save = true) {
+    $("error").textContent = "";
+
+    const name = $("countdownName").value.trim();
+    const date = $("targetDate").value;
+    const time = $("targetTime").value;
+
+    if (!name) {
+      $("error").textContent = "Please enter a countdown name.";
+      return false;
+    }
+
+    if (!date || !time) {
+      $("error").textContent = "Please enter the end date and time.";
+      return false;
+    }
+
+    const candidate = new Date(date + "T" + time);
+
+    if (Number.isNaN(candidate.getTime()) || candidate.getTime() <= Date.now()) {
+      $("error").textContent = "Please choose a valid future date and time.";
+      return false;
+    }
+
+    target = candidate;
+
+    $("displayName").textContent = name;
+    $("targetText").textContent = "Target: " + candidate.toLocaleString();
+
+    $("countdown").style.display = "flex";
+    $("timeup").style.display = "none";
+
+    if (save) saveSettings();
+
+    clearInterval(timer);
+    render();
+    timer = setInterval(render, 250);
+    return true;
+  }
+
+  function resetCountdown() {
+    clearInterval(timer);
+    timer = null;
+    target = null;
+
+    $("countdownName").value = "";
+    $("targetDate").value = "";
+    $("targetTime").value = "";
+
+    $("displayName").textContent = "COUNTDOWN TIMER";
+    $("targetText").textContent = "Choose a target date and time";
+    $("error").textContent = "";
+    $("days").textContent = "000";
+    $("hours").textContent = "00";
+    $("minutes").textContent = "00";
+    $("seconds").textContent = "00";
+    $("countdown").style.display = "flex";
+    $("timeup").style.display = "none";
+
+    clearSavedSettings();
+  }
+
+  $("startBtn").addEventListener("click", () => startCountdown(true));
+  $("resetBtn").addEventListener("click", resetCountdown);
+
+  $("fullscreenBtn").addEventListener("click", async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (e) {
+      $("error").textContent = "Full screen is not available in this browser.";
+    }
+  });
+
+  [$("countdownName"), $("targetDate"), $("targetTime")].forEach(el => {
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") startCountdown(true);
+    });
+  });
+
+  // Load the last saved countdown when the page opens.
+  const hasSaved = loadSettings();
+
+  if (hasSaved) {
+    if (!startCountdown(false)) {
+      setSaved("Saved countdown was found, but its target time has passed.");
+    } else {
+      setSaved("Last countdown restored from this browser");
+    }
+  } else {
+    startCountdown(false);
+    setSaved("Default countdown loaded");
+  }
+})();
+</script>
+</body>
+</html>
